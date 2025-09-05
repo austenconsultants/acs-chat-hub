@@ -11,7 +11,6 @@ import { ArrowLeft, Eye, EyeOff, Save, User, Smile } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
-// [Keep all your existing interfaces and constants - no changes needed]
 interface APISettings {
   openai: {
     apiKey: string
@@ -33,7 +32,6 @@ interface APISettings {
     username: string
     enableEmojis: boolean
     emojiStyle: "native" | "twitter" | "apple"
-    customAvatarUrl?: string
   }
 }
 
@@ -93,99 +91,98 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
   }>({})
 
   const [isSaving, setIsSaving] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
   const [customAvatarUrl, setCustomAvatarUrl] = useState("")
+  const [currentDomain, setCurrentDomain] = useState<any>(null)
 
-  // Load settings from API on mount
   useEffect(() => {
-    const loadSettings = async () => {
-      setIsLoading(true)
+    const savedDomain = localStorage.getItem("acs-selected-domain")
+    if (savedDomain) {
       try {
-        const response = await fetch("/api/settings")
+        setCurrentDomain(JSON.parse(savedDomain))
+      } catch (error) {
+        console.error("Failed to parse saved domain:", error)
+      }
+    }
+
+    const loadSettings = async () => {
+      try {
+        const domainId = currentDomain?.id || "acs-main"
+        const response = await fetch(`/api/settings?domain_id=${domainId}`)
         if (response.ok) {
-          const data = await response.json()
-          if (data.settings) {
-            setSettings(data.settings)
-            // Handle custom avatar URL
-            if (data.settings.personalization?.avatar === "custom") {
-              setCustomAvatarUrl(data.settings.personalization.customAvatarUrl || "")
-            }
+          const backendSettings = await response.json()
+          setSettings((prev) => ({
+            ...prev,
+            ...backendSettings,
+            personalization: {
+              ...prev.personalization,
+              ...(backendSettings.personalization || {}),
+            },
+          }))
+
+          if (backendSettings.personalization?.avatar === "custom") {
+            const customUrl = localStorage.getItem(`acs-custom-avatar-url-${domainId}`)
+            if (customUrl) setCustomAvatarUrl(customUrl)
           }
         } else {
-          console.error("Failed to load settings from API")
-          // Try localStorage as fallback
-          const savedSettings = localStorage.getItem("acs-chat-settings")
+          // Fallback to localStorage if backend fails
+          const savedSettings = localStorage.getItem(`acs-chat-settings-${domainId}`)
           if (savedSettings) {
-            try {
-              const parsed = JSON.parse(savedSettings)
-              setSettings((prev) => ({
-                ...prev,
-                ...parsed,
-                personalization: {
-                  ...prev.personalization,
-                  ...(parsed.personalization || {}),
-                },
-              }))
-              if (parsed.personalization?.avatar === "custom") {
-                const customUrl = localStorage.getItem("acs-custom-avatar-url")
-                if (customUrl) setCustomAvatarUrl(customUrl)
-              }
-            } catch (error) {
-              console.error("Failed to parse localStorage settings:", error)
-            }
+            const parsed = JSON.parse(savedSettings)
+            setSettings((prev) => ({ ...prev, ...parsed }))
           }
         }
       } catch (error) {
-        console.error("Failed to fetch settings:", error)
-      } finally {
-        setIsLoading(false)
+        console.error("Failed to load settings from backend:", error)
+        // Fallback to localStorage
+        const domainId = currentDomain?.id || "acs-main"
+        const savedSettings = localStorage.getItem(`acs-chat-settings-${domainId}`)
+        if (savedSettings) {
+          const parsed = JSON.parse(savedSettings)
+          setSettings((prev) => ({ ...prev, ...parsed }))
+        }
       }
     }
-    
+
     loadSettings()
-  }, [])
+  }, [currentDomain])
 
   const handleSave = async () => {
     setIsSaving(true)
     try {
-      // Prepare settings with custom avatar URL if needed
-      const settingsToSave = {
-        ...settings,
-        personalization: {
-          ...settings.personalization,
-          customAvatarUrl: settings.personalization.avatar === "custom" ? customAvatarUrl : ""
-        }
-      }
-      
-      // Save to API (SQLite)
+      console.log("[v0] Starting settings save process")
+      const domainId = currentDomain?.id || "acs-main"
+
       const response = await fetch("/api/settings", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(settingsToSave),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settings,
+          domain_id: domainId,
+        }),
       })
-      
+
       if (response.ok) {
-        const data = await response.json()
-        if (data.settings) {
-          setSettings(data.settings)
-        }
-        // Also save to localStorage as backup
-        localStorage.setItem("acs-chat-settings", JSON.stringify(settingsToSave))
-        if (settings.personalization.avatar === "custom") {
-          localStorage.setItem("acs-custom-avatar-url", customAvatarUrl)
-        }
+        console.log("[v0] Settings saved to backend successfully for domain:", domainId)
       } else {
-        throw new Error("Failed to save settings to API")
+        console.warn("[v0] Backend save failed, using localStorage fallback")
       }
-    } catch (error) {
-      console.error("Failed to save settings:", error)
-      // Fall back to localStorage only
-      localStorage.setItem("acs-chat-settings", JSON.stringify(settings))
+
+      // Always save to localStorage as backup with domain isolation
+      localStorage.setItem(`acs-chat-settings-${domainId}`, JSON.stringify(settings))
       if (settings.personalization.avatar === "custom") {
-        localStorage.setItem("acs-custom-avatar-url", customAvatarUrl)
+        localStorage.setItem(`acs-custom-avatar-url-${domainId}`, customAvatarUrl)
       }
+
+      await new Promise((resolve) => setTimeout(resolve, 500))
+
+      console.log("[v0] Settings saved, navigating back to main screen")
+      onBack()
+    } catch (error) {
+      console.error("[v0] Failed to save settings:", error)
+      // Still save to localStorage even if backend fails
+      const domainId = currentDomain?.id || "acs-main"
+      localStorage.setItem(`acs-chat-settings-${domainId}`, JSON.stringify(settings))
+      onBack()
     } finally {
       setIsSaving(false)
     }
@@ -210,49 +207,59 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
     return selectedAvatar?.url || "/placeholder.svg?height=40&width=40&text=👤"
   }
 
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-black mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading settings...</p>
-        </div>
-      </div>
-    )
-  }
-
-  // [Rest of your component JSX remains exactly the same]
   return (
     <div className="flex h-screen bg-background">
       <div className="flex-1 flex flex-col">
         {/* Header */}
-        <div className="border-b border-border bg-white px-6 py-4 shadow-sm">
+        <div className="border-b border-border bg-card px-6 py-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" onClick={onBack} className="text-gray-600 hover:bg-gray-100">
+              <Button variant="ghost" size="icon" onClick={onBack} className="text-muted-foreground hover:bg-accent/10">
                 <ArrowLeft className="h-4 w-4" />
               </Button>
               <div className="text-2xl font-bold">
-                <span className="text-black">AUSTEN</span>
-                <span className="text-red-600">TEL</span>
+                <span className="text-primary">AUSTEN</span>
+                <span className="text-accent">TEL</span>
               </div>
               <div className="h-6 w-px bg-border" />
-              <h1 className="text-xl font-semibold text-black">Settings</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-semibold text-foreground">Settings</h1>
+                {currentDomain && (
+                  <Badge variant="outline" className="text-xs">
+                    {currentDomain.name}
+                  </Badge>
+                )}
+              </div>
             </div>
-            <Button onClick={handleSave} disabled={isSaving} className="bg-black hover:bg-gray-800 text-white">
+            <Button
+              onClick={handleSave}
+              disabled={isSaving}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground"
+            >
               <Save className="h-4 w-4 mr-2" />
               {isSaving ? "Saving..." : "Save Settings"}
             </Button>
           </div>
         </div>
 
-        {/* Settings Content - Keep all your existing JSX here */}
+        {/* Settings Content */}
         <div className="flex-1 overflow-auto p-6">
           <div className="max-w-4xl mx-auto space-y-6">
-            {/* All your existing cards remain the same */}
-            <Card className="shadow-sm border-gray-200">
+            {currentDomain && (
+              <Card className="shadow-sm border-border bg-muted/50">
+                <CardHeader>
+                  <CardTitle className="text-lg font-semibold text-foreground">Domain: {currentDomain.name}</CardTitle>
+                  <CardDescription>
+                    These settings are specific to the {currentDomain.name} domain and will not affect other customer
+                    domains.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            )}
+
+            <Card className="shadow-sm border-border">
               <CardHeader>
-                <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <CardTitle className="text-lg font-semibold flex items-center gap-2 text-foreground">
                   <User className="h-5 w-5" />
                   Personalization
                 </CardTitle>
@@ -270,8 +277,8 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                       </AvatarFallback>
                     </Avatar>
                     <div>
-                      <p className="font-medium">{settings.personalization.username}</p>
-                      <p className="text-sm text-gray-500">Current avatar</p>
+                      <p className="font-medium text-foreground">{settings.personalization.username}</p>
+                      <p className="text-sm text-muted-foreground">Current avatar</p>
                     </div>
                   </div>
 
@@ -282,8 +289,8 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                           onClick={() => updateSettings("personalization", "avatar", avatar.id)}
                           className={`w-full p-3 rounded-lg border-2 transition-colors ${
                             settings.personalization.avatar === avatar.id
-                              ? "border-black bg-gray-50"
-                              : "border-gray-200 hover:border-gray-300"
+                              ? "border-primary bg-accent/50"
+                              : "border-border hover:border-muted-foreground"
                           }`}
                         >
                           {avatar.id !== "custom" ? (
@@ -294,12 +301,12 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                               </AvatarFallback>
                             </Avatar>
                           ) : (
-                            <div className="h-12 w-12 mx-auto bg-gray-100 rounded-full flex items-center justify-center">
-                              <User className="h-6 w-6 text-gray-400" />
+                            <div className="h-12 w-12 mx-auto bg-muted rounded-full flex items-center justify-center">
+                              <User className="h-6 w-6 text-muted-foreground" />
                             </div>
                           )}
                         </button>
-                        <p className="text-xs text-center text-gray-600">{avatar.name}</p>
+                        <p className="text-xs text-center text-muted-foreground">{avatar.name}</p>
                       </div>
                     ))}
                   </div>
@@ -340,7 +347,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                         <Smile className="h-4 w-4" />
                         Emoji Support
                       </Label>
-                      <p className="text-sm text-gray-500">Enable emoji reactions and quick access</p>
+                      <p className="text-sm text-muted-foreground">Enable emoji reactions and quick access</p>
                     </div>
                     <Switch
                       checked={settings.personalization.enableEmojis}
@@ -374,13 +381,14 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                         <Label>Quick Access Emojis</Label>
                         {EMOJI_CATEGORIES.map((category) => (
                           <div key={category.name} className="space-y-2">
-                            <p className="text-sm font-medium text-gray-600">{category.name}</p>
+                            <p className="text-sm font-medium text-muted-foreground">{category.name}</p>
                             <div className="flex flex-wrap gap-2">
                               {category.emojis.map((emoji) => (
                                 <button
                                   key={emoji}
-                                  className="w-8 h-8 rounded hover:bg-gray-100 flex items-center justify-center text-lg transition-colors"
+                                  className="w-8 h-8 rounded hover:bg-accent flex items-center justify-center text-lg transition-colors"
                                   onClick={() => {
+                                    // This would add emoji to a favorites list or copy to clipboard
                                     navigator.clipboard?.writeText(emoji)
                                   }}
                                   title={`Copy ${emoji} to clipboard`}
@@ -398,13 +406,10 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
               </CardContent>
             </Card>
 
-            {/* Rest of your cards (OpenAI, Claude, MCP, Connection Status) remain exactly the same */}
-            {/* ... */}
-            
             {/* OpenAI Settings */}
-            <Card className="shadow-sm border-gray-200">
+            <Card className="shadow-sm border-border">
               <CardHeader>
-                <CardTitle className="text-lg font-semibold">OpenAI</CardTitle>
+                <CardTitle className="text-lg font-semibold text-foreground">OpenAI</CardTitle>
                 <CardDescription>Configure OpenAI API settings</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -445,9 +450,9 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
             </Card>
 
             {/* Claude Settings */}
-            <Card className="shadow-sm border-gray-200">
+            <Card className="shadow-sm border-border">
               <CardHeader>
-                <CardTitle className="text-lg font-semibold">Claude</CardTitle>
+                <CardTitle className="text-lg font-semibold text-foreground">Claude</CardTitle>
                 <CardDescription>Configure Claude API settings</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -490,9 +495,9 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
             <Separator />
 
             {/* MCP Settings */}
-            <Card className="shadow-sm border-gray-200">
+            <Card className="shadow-sm border-border">
               <CardHeader>
-                <CardTitle className="text-lg font-semibold">MCP</CardTitle>
+                <CardTitle className="text-lg font-semibold text-foreground">MCP</CardTitle>
                 <CardDescription>Configure MCP settings</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -524,27 +529,27 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
             </Card>
 
             {/* Connection Status Summary */}
-            <Card className="shadow-sm border-gray-200">
+            <Card className="shadow-sm border-border">
               <CardHeader>
-                <CardTitle className="text-lg font-semibold">Connection Status</CardTitle>
+                <CardTitle className="text-lg font-semibold text-foreground">Connection Status</CardTitle>
                 <CardDescription>Overview of all configured services</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <span className="font-medium">OpenAI</span>
+                  <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                    <span className="font-medium text-foreground">OpenAI</span>
                     <Badge variant={settings.openai.enabled && settings.openai.apiKey ? "default" : "secondary"}>
                       {settings.openai.enabled && settings.openai.apiKey ? "Ready" : "Not Configured"}
                     </Badge>
                   </div>
-                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <span className="font-medium">Claude</span>
+                  <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                    <span className="font-medium text-foreground">Claude</span>
                     <Badge variant={settings.claude.enabled && settings.claude.apiKey ? "default" : "secondary"}>
                       {settings.claude.enabled && settings.claude.apiKey ? "Ready" : "Not Configured"}
                     </Badge>
                   </div>
-                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <span className="font-medium">MCP</span>
+                  <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                    <span className="font-medium text-foreground">MCP</span>
                     <Badge variant={settings.mcp.enabled && settings.mcp.serverUrl ? "default" : "secondary"}>
                       {settings.mcp.enabled && settings.mcp.serverUrl ? "Ready" : "Not Configured"}
                     </Badge>
@@ -552,7 +557,6 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                 </div>
               </CardContent>
             </Card>
-            
           </div>
         </div>
       </div>

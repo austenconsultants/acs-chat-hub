@@ -3,11 +3,24 @@
 import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
-import { MessageSquare, Plus, Search, Settings, Users, Bot, ChevronLeft, ChevronRight, X } from "lucide-react"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import {
+  MessageSquare,
+  Plus,
+  Search,
+  Settings,
+  Users,
+  Bot,
+  ChevronLeft,
+  ChevronRight,
+  X,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { TokenCounter } from "./token-counter"
 
@@ -42,6 +55,65 @@ export function ChatSidebar({
   const [searchResults, setSearchResults] = useState<Chat[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [searchActive, setSearchActive] = useState(false)
+  const [openAgents, setOpenAgents] = useState<Record<string, boolean>>({
+    "acs-manager": true,
+    acs: false,
+    "acs-voice": false,
+    "acs-voice-agent": false,
+    infrastructure: false,
+  })
+
+  const safeChats = Array.isArray(chats) ? chats : []
+
+  const agents = [
+    {
+      id: "acs-manager",
+      name: "ACS Manager",
+      description: "Administrative and management tasks",
+      chats: safeChats.filter(
+        (chat) => chat?.title?.toLowerCase().includes("manager") || chat?.title?.toLowerCase().includes("admin"),
+      ),
+      color: "bg-primary",
+    },
+    {
+      id: "acs",
+      name: "ACS",
+      description: "General ACS operations",
+      chats: safeChats.filter(
+        (chat) =>
+          chat?.title && !chat.title.toLowerCase().includes("manager") && !chat.title.toLowerCase().includes("voice"),
+      ),
+      color: "bg-accent",
+    },
+    {
+      id: "acs-voice",
+      name: "ACS Voice",
+      description: "Voice communication services",
+      chats: safeChats.filter(
+        (chat) => chat?.title?.toLowerCase().includes("voice") && !chat?.title?.toLowerCase().includes("agent"),
+      ),
+      color: "bg-primary/80",
+    },
+    {
+      id: "acs-voice-agent",
+      name: "ACS Voice Agent",
+      description: "Voice agent interactions",
+      chats: safeChats.filter(
+        (chat) => chat?.title?.toLowerCase().includes("voice") && chat?.title?.toLowerCase().includes("agent"),
+      ),
+      color: "bg-accent/80",
+    },
+    {
+      id: "infrastructure",
+      name: "Infrastructure",
+      description: "System infrastructure and monitoring",
+      chats: safeChats.filter(
+        (chat) =>
+          chat?.title?.toLowerCase().includes("infrastructure") || chat?.title?.toLowerCase().includes("system"),
+      ),
+      color: "bg-primary/60",
+    },
+  ]
 
   const debounceSearch = useCallback(
     debounce(async (query: string) => {
@@ -58,7 +130,7 @@ export function ChatSidebar({
       try {
         const response = await fetch(`/api/chats/search?q=${encodeURIComponent(query)}`)
         const data = await response.json()
-        setSearchResults(data.chats || [])
+        setSearchResults(Array.isArray(data.chats) ? data.chats : [])
       } catch (error) {
         console.error("[v0] Search failed:", error)
         setSearchResults([])
@@ -80,16 +152,16 @@ export function ChatSidebar({
     setIsSearching(false)
   }
 
-  const displayChats = searchActive ? searchResults : chats
-  const totalTokens = chats.reduce((sum, chat) => sum + chat.total_tokens, 0)
-  const currentChat = chats.find((chat) => chat.id === currentChatId)
+  const totalTokens = safeChats.reduce((sum, chat) => sum + (chat?.total_tokens || 0), 0)
+  const currentChat = safeChats.find((chat) => chat?.id === currentChatId)
   const currentChatTokens = currentChat?.total_tokens || 0
 
-  const contacts = [
-    { id: "1", name: "Sarah Chen", status: "online", avatar: "/professional-woman-diverse.png" },
-    { id: "2", name: "Mike Johnson", status: "away", avatar: "/professional-man.png" },
-    { id: "3", name: "AI Assistant", status: "online", avatar: "/ai-robot.jpg" },
-  ]
+  const toggleAgent = (agentId: string) => {
+    setOpenAgents((prev) => ({
+      ...prev,
+      [agentId]: !prev[agentId],
+    }))
+  }
 
   if (!isOpen) {
     return (
@@ -168,120 +240,137 @@ export function ChatSidebar({
         )}
       </div>
 
+      <div className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+          <div className="p-4">
+            <h3 className="text-sm font-medium text-sidebar-foreground mb-3">
+              {searchActive ? "Search Results" : "ACS Agents"}
+            </h3>
+
+            {searchActive ? (
+              <div className="space-y-2">
+                {searchResults.map((chat) => (
+                  <Card
+                    key={chat.id}
+                    className={`p-3 hover:bg-sidebar-accent cursor-pointer transition-colors ${
+                      currentChatId === chat.id ? "bg-sidebar-accent border-sidebar-primary" : ""
+                    }`}
+                    onClick={() => {
+                      onChatSelect?.(chat.id)
+                      clearSearch()
+                    }}
+                  >
+                    <div className="flex items-start gap-3">
+                      <Avatar className="h-8 w-8 mt-1">
+                        <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground">
+                          <Bot className="h-4 w-4" />
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-medium text-sidebar-foreground truncate">{chat.title}</h4>
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(chat.updated_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Badge variant="outline" className="text-xs">
+                            {chat.model}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {chat.message_count} msgs • {chat.total_tokens} tokens
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+
+                {searchResults.length === 0 && !isSearching && (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Search className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No chats found matching "{searchQuery}"</p>
+                    <p className="text-xs mt-1">Try different keywords or check spelling</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {agents.map((agent) => (
+                  <Collapsible key={agent.id} open={openAgents[agent.id]} onOpenChange={() => toggleAgent(agent.id)}>
+                    <CollapsibleTrigger asChild>
+                      <Card className="p-3 hover:bg-sidebar-accent cursor-pointer transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-3 h-3 rounded-full ${agent.color}`} />
+                          <div className="flex-1">
+                            <h4 className="text-sm font-medium text-sidebar-foreground">{agent.name}</h4>
+                            <p className="text-xs text-muted-foreground">{agent.description}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">
+                              {agent.chats.length}
+                            </Badge>
+                            {openAgents[agent.id] ? (
+                              <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="ml-6 mt-2 space-y-1">
+                      {agent.chats.map((chat) => (
+                        <Card
+                          key={chat.id}
+                          className={`p-2 hover:bg-sidebar-accent cursor-pointer transition-colors ${
+                            currentChatId === chat.id ? "bg-sidebar-accent border-sidebar-primary" : ""
+                          }`}
+                          onClick={() => onChatSelect?.(chat.id)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <h5 className="text-xs font-medium text-sidebar-foreground truncate">{chat.title}</h5>
+                            <span className="text-xs text-muted-foreground">
+                              {new Date(chat.updated_at).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-xs">
+                              {chat.model}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">{chat.total_tokens} tokens</span>
+                          </div>
+                        </Card>
+                      ))}
+                      {agent.chats.length === 0 && (
+                        <div className="text-center py-4 text-muted-foreground">
+                          <p className="text-xs">No conversations yet</p>
+                        </div>
+                      )}
+                    </CollapsibleContent>
+                  </Collapsible>
+                ))}
+
+                {safeChats.length === 0 && (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No conversations yet</p>
+                    <p className="text-xs mt-1">Start a new chat to begin</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+      </div>
+
       {/* Token Counter */}
-      <div className="p-4 border-b border-sidebar-border">
+      <div className="p-4 border-t border-sidebar-border">
         <TokenCounter
           currentChatTokens={currentChatTokens}
           totalTokens={totalTokens}
           model={currentChat?.model || "gpt-4"}
         />
-      </div>
-
-      {/* Recent Chats */}
-      <div className="flex-1 overflow-hidden">
-        <ScrollArea className="h-full">
-          <div className="p-4">
-            <h3 className="text-sm font-medium text-sidebar-foreground mb-3">
-              {searchActive ? "Search Results" : "Recent Chats"}
-            </h3>
-            <div className="space-y-2">
-              {displayChats.map((chat) => (
-                <Card
-                  key={chat.id}
-                  className={`p-3 hover:bg-sidebar-accent cursor-pointer transition-colors ${
-                    currentChatId === chat.id ? "bg-sidebar-accent border-sidebar-primary" : ""
-                  }`}
-                  onClick={() => {
-                    onChatSelect?.(chat.id)
-                    if (searchActive) {
-                      clearSearch()
-                    }
-                  }}
-                >
-                  <div className="flex items-start gap-3">
-                    <Avatar className="h-8 w-8 mt-1">
-                      <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground">
-                        <Bot className="h-4 w-4" />
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-sm font-medium text-sidebar-foreground truncate">{chat.title}</h4>
-                        <span className="text-xs text-muted-foreground">
-                          {new Date(chat.updated_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <Badge variant="outline" className="text-xs">
-                          {chat.model}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground">
-                          {chat.message_count} msgs • {chat.total_tokens} tokens
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-
-              {displayChats.length === 0 && searchActive && !isSearching && (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Search className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">No chats found matching "{searchQuery}"</p>
-                  <p className="text-xs mt-1">Try different keywords or check spelling</p>
-                </div>
-              )}
-
-              {displayChats.length === 0 && !searchActive && (
-                <div className="text-center py-8 text-muted-foreground">
-                  <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">No conversations yet</p>
-                  <p className="text-xs mt-1">Start a new chat to begin</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {!searchActive && (
-            <>
-              <Separator />
-
-              {/* Contacts */}
-              <div className="p-4">
-                <h3 className="text-sm font-medium text-sidebar-foreground mb-3">Contacts</h3>
-                <div className="space-y-2">
-                  {contacts.map((contact) => (
-                    <div
-                      key={contact.id}
-                      className="flex items-center gap-3 p-2 hover:bg-sidebar-accent rounded-md cursor-pointer transition-colors"
-                    >
-                      <div className="relative">
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage src={contact.avatar || "/placeholder.svg"} />
-                          <AvatarFallback>
-                            {contact.name
-                              .split(" ")
-                              .map((n) => n[0])
-                              .join("")}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div
-                          className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-sidebar ${
-                            contact.status === "online" ? "bg-green-500" : "bg-yellow-500"
-                          }`}
-                        />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-sidebar-foreground">{contact.name}</p>
-                        <p className="text-xs text-muted-foreground capitalize">{contact.status}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-        </ScrollArea>
       </div>
     </div>
   )

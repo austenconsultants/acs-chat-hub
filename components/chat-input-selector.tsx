@@ -24,8 +24,6 @@ type ModelId =
   | "claude-3-opus"
   | "claude-3-sonnet"
   | "claude-3-haiku"
-  | "claude-opus-4-1"
-  | "claude-sonnet-4"
 
 interface ChatInputSelectorProps {
   value: string
@@ -55,8 +53,6 @@ export function ChatInputSelector({
     { id: "gpt-3.5-turbo" as const, name: "GPT-3.5 Turbo", icon: Clock, badge: "Budget", group: "OpenAI" },
 
     // Claude Models
-    { id: "claude-opus-4-1" as const, name: "Claude Opus 4.1", icon: Sparkles, badge: "Latest", group: "Claude" },
-    { id: "claude-sonnet-4" as const, name: "Claude Sonnet 4", icon: Brain, badge: "New", group: "Claude" },
     { id: "claude-3-5-sonnet" as const, name: "Claude 3.5 Sonnet", icon: Sparkles, badge: "Best", group: "Claude" },
     { id: "claude-3-opus" as const, name: "Claude 3 Opus", icon: Brain, badge: "Power", group: "Claude" },
     { id: "claude-3-sonnet" as const, name: "Claude 3 Sonnet", icon: Bot, badge: "Balanced", group: "Claude" },
@@ -80,14 +76,14 @@ export function ChatInputSelector({
             onChange={(e) => onChange(e.target.value)}
             onKeyPress={onKeyPress}
             placeholder="Type your message..."
-            className="pr-20 min-h-[44px] resize-none border-gray-200 focus:border-black focus:ring-black"
+            className="pr-20 min-h-[44px] resize-none border-gray-200 focus:border-primary focus:ring-primary"
             disabled={disabled}
           />
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-600 hover:bg-gray-100">
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-600 hover:bg-accent/10">
               <Smile className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-600 hover:bg-gray-100">
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-600 hover:bg-accent/10">
               <Mic className="h-4 w-4" />
             </Button>
           </div>
@@ -155,7 +151,7 @@ export function ChatInputSelector({
         <Button
           onClick={onSend}
           disabled={!value.trim() || disabled}
-          className="mb-2 bg-black hover:bg-gray-800 text-white"
+          className="mb-2 bg-primary hover:bg-primary/90 text-primary-foreground"
         >
           <Send className="h-4 w-4" />
         </Button>
