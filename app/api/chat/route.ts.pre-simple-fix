@@ -1,0 +1,456 @@
+// app/api/chat/route.ts
+// Complete chat API with MCP integration and SSH support
+
+import { type NextRequest, NextResponse } from "next/server"
+import { getDatabase } from "@/lib/database"
+
+// MCP command patterns to detect
+const MCP_PATTERNS = {
+  ssh: /(?:execute|run|ssh)\s+(.+?)\s+on\s+(?:server\s+)?([0-9.]+|[\w.-]+)/i,
+  port: /check\s+(?:if\s+)?port\s+(\d+)\s+(?:is\s+open\s+)?(?:on\s+)?([0-9.]+|[\w.-]+)/i,
+  freeswitch: /(?:check\s+)?freeswitch\s+status/i,
+  valkey: /(?:check\s+)?valkey\s+(?:cache\s+)?status/i,
+  calculate: /calculate\s+(\d+)\s*([+\-*/])\s*(\d+)/i,
+  test: /(?:test\s+)?mcp\s+(?:test|connection|command)/i,
+  listTools: /(?:list|show|what are)\s+(?:the\s+)?(?:mcp\s+)?(?:tools|services|commands|functions)/i,
+}
+
+// Function to detect and extract MCP commands from user message
+function detectMCPCommand(message: string) {
+  // Check SSH command
+  const sshMatch = message.match(MCP_PATTERNS.ssh)
+  if (sshMatch) {
+    return {
+      tool: 'ssh_command',
+      args: {
+        command: sshMatch[1].trim(),
+        host: sshMatch[2].trim()
+      }
+    }
+  }
+
+  // Check port command
+  const portMatch = message.match(MCP_PATTERNS.port)
+  if (portMatch) {
+    return {
+      tool: 'check_port',
+      args: {
+        port: parseInt(portMatch[1]),
+        host: portMatch[2].trim()
+      }
+    }
+  }
+
+  // Check FreeSWITCH
+  if (MCP_PATTERNS.freeswitch.test(message)) {
+    return { tool: 'freeswitch_status', args: {} }
+  }
+
+  // Check Valkey
+  if (MCP_PATTERNS.valkey.test(message)) {
+    return { tool: 'valkey_status', args: {} }
+  }
+
+  // Check calculation
+  const calcMatch = message.match(MCP_PATTERNS.calculate)
+  if (calcMatch) {
+    const a = parseFloat(calcMatch[1])
+    const operator = calcMatch[2]
+    const b = parseFloat(calcMatch[3])
+    
+    // Perform calculation based on operator
+    let result = 0
+    switch(operator) {
+      case '+': result = a + b; break
+      case '-': result = a - b; break
+      case '*': result = a * b; break
+      case '/': result = b !== 0 ? a / b : 0; break
+    }
+    
+    return { 
+      tool: 'calculate', 
+      args: { a, b, operator, expectedResult: result }
+    }
+  }
+
+  // Check test command
+  if (MCP_PATTERNS.test.test(message)) {
+    return { tool: 'test', args: {} }
+  }
+  
+  // Check for list tools command
+  if (MCP_PATTERNS.listTools.test(message)) {
+    return { tool: 'list_tools', args: {} }
+  }
+
+  return null
+}
+
+// Function to call MCP tool
+async function callMCPTool(toolName: string, args: any) {
+  try {
+    // Special case for listing tools
+    if (toolName === 'list_tools') {
+      const response = await fetch('http://localhost:3000/api/mcp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: Date.now(),
+          method: 'tools/list',
+          params: {}
+        })
+      })
+      
+      const data = await response.json()
+      
+      if (data.result?.tools) {
+        const toolsList = data.result.tools.map((tool: any) => 
+          `• **${tool.name}**: ${tool.description}`
+        ).join('\n')
+        
+        return {
+          success: true,
+          result: {
+            content: [{
+              text: `Available MCP Tools:\n\n${toolsList}`,
+              type: 'text'
+            }]
+          }
+        }
+      }
+      
+      return {
+        success: false,
+        error: 'Failed to list tools'
+      }
+    }
+    
+    // Regular tool call
+    const response = await fetch('http://localhost:3000/api/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: Date.now(),
+        method: 'tools/call',
+        params: {
+          name: toolName,
+          arguments: args
+        }
+      })
+    })
+
+    const data = await response.json()
+    
+    if (data.result) {
+      return {
+        success: true,
+        result: data.result
+      }
+    } else if (data.error) {
+      return {
+        success: false,
+        error: data.error.message
+      }
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'MCP call failed'
+    }
+  }
+}
+
+// Helper function to format MCP responses nicely
+function formatMCPResponse(tool: string, result: any): string {
+  switch (tool) {
+    case 'ssh_command':
+      // Handle the nested content structure from MCP
+      if (result?.content?.[0]?.text) {
+        return `SSH Command Result:\n\`\`\`\n${result.content[0].text}\n\`\`\``
+      }
+      if (result?.output) {
+        return `SSH Command Result:\n\`\`\`\n${result.output}\n\`\`\``
+      }
+      return `SSH Command Result:\n\`\`\`\n${result.message || JSON.stringify(result)}\n\`\`\``
+    
+    case 'check_port':
+      // Handle boolean or object response
+      if (typeof result === 'boolean') {
+        return `Port Check Result: ${result ? '✅ Port is open' : '❌ Port is closed'}`
+      }
+      if (result?.content?.[0]?.text) {
+        const text = result.content[0].text
+        return `Port Check Result: ${text.includes('open') ? '✅ Port is open' : '❌ Port is closed'}`
+      }
+      return `Port Check Result: ${result.open ? '✅ Port is open' : '❌ Port is closed'}\n${result.message || ''}`
+    
+    case 'freeswitch_status':
+      if (result?.content?.[0]?.text) {
+        return `FreeSWITCH Status:\n${result.content[0].text}`
+      }
+      return `FreeSWITCH Status:\n${JSON.stringify(result, null, 2)}`
+    
+    case 'valkey_status':
+      if (result?.content?.[0]?.text) {
+        return `Valkey Cache Status:\n${result.content[0].text}`
+      }
+      return `Valkey Cache Status:\n${JSON.stringify(result, null, 2)}`
+    
+    case 'calculate':
+      // Fix: Handle object response properly
+      if (result?.result !== undefined) {
+        return `Calculation Result: ${result.result}`
+      }
+      if (result?.content?.[0]?.text) {
+        return `Calculation Result: ${result.content[0].text}`
+      }
+      // If it's a number, return it directly
+      if (typeof result === 'number') {
+        return `Calculation Result: ${result}`
+      }
+      // Fallback for unexpected format
+      return `Calculation Result: ${JSON.stringify(result)}`
+    
+    case 'test':
+      if (result?.content?.[0]?.text) {
+        return `MCP Test: ${result.content[0].text}`
+      }
+      return `MCP Test: ✅ Connection successful!\n${result.message || 'MCP server is responding'}`
+    
+    case 'list_tools':
+      if (result?.content?.[0]?.text) {
+        return result.content[0].text
+      }
+      return `MCP Tools:\n${JSON.stringify(result, null, 2)}`
+    
+    default:
+      // Handle nested content structure
+      if (result?.content?.[0]?.text) {
+        return `MCP Result: ${result.content[0].text}`
+      }
+      return `MCP Result:\n${JSON.stringify(result, null, 2)}`
+  }
+}
+
+export async function POST(request: NextRequest) {
+
+
+  try {
+    const { message, model, chatId } = await request.json()
+    
+    // Get API keys and settings from database
+    const db = getDatabase()
+    const settings = db.getSettings()
+    
+    console.log("[Chat API] Request:", { model, messageLength: message.length })
+      console.log("[Chat API DEBUG] Raw model from request:", model)
+    
+    // Check if MCP is enabled and detect commands
+    let mcpResponse = null
+    if (settings?.mcp?.enabled) {
+      const mcpCommand = detectMCPCommand(message)
+      
+      if (mcpCommand) {
+        console.log("[Chat API] MCP command detected:", mcpCommand)
+        
+        // Execute MCP command
+        const result = await callMCPTool(mcpCommand.tool, mcpCommand.args)
+        
+        if (result.success) {
+          // Format MCP response
+          mcpResponse = formatMCPResponse(mcpCommand.tool, result.result)
+          console.log("[Chat API] MCP executed successfully")
+        } else {
+          mcpResponse = `MCP Error: ${result.error}`
+          console.error("[Chat API] MCP failed:", result.error)
+        }
+      }
+    }
+    
+    // If MCP handled the request, return early
+    if (mcpResponse) {
+      // Create or get chat
+      let currentChatId = chatId
+      if (!currentChatId) {
+        const chat = db.createChat(message.slice(0, 50) + "...", model)
+        currentChatId = chat.id
+      }
+      
+      // Save user message
+      db.addMessage(currentChatId, "user", message, 0)
+      
+      // Save MCP response
+      db.addMessage(currentChatId, "assistant", mcpResponse, 0)
+      
+      return NextResponse.json({
+        response: mcpResponse,
+        chatId: currentChatId,
+        tokens: { total: 0 },
+        model: model,
+        source: 'mcp' // Indicate this came from MCP
+      })
+    }
+    
+    // Otherwise, proceed with normal AI chat flow
+    // Map UI model names to API model IDs
+    const modelMapping: Record<string, string> = {
+      // OpenAI models
+      "GPT-4o": "gpt-4o",
+      "GPT-4o Mini": "gpt-4o-mini", 
+      "GPT-4 Turbo": "gpt-4-turbo",
+      "GPT-4": "gpt-4",
+      "GPT-3.5 Turbo": "gpt-3.5-turbo",
+      "gpt-4o": "gpt-4o",
+      "gpt-4o-mini": "gpt-4o-mini",
+      "gpt-4-turbo": "gpt-4-turbo",
+      "gpt-4": "gpt-4",
+      "gpt-3.5-turbo": "gpt-3.5-turbo",
+      
+      // Claude models - UI names to API IDs
+      "Claude 3.5 Sonnet": "claude-3-5-sonnet-20241022",
+      "Claude 3 Opus": "claude-3-opus-20240229",
+      "Claude 3 Sonnet": "claude-3-sonnet-20240229",
+      "Claude 3 Haiku": "claude-3-haiku-20240307",
+      "claude-3-5-sonnet": "claude-3-5-sonnet-20241022",
+      "claude-3-opus": "claude-3-opus-20240229",
+      "claude-3-sonnet": "claude-3-sonnet-20240229",
+      "claude-3-haiku": "claude-3-haiku-20240307"
+,
+      
+      // Claude 4 models - Latest generation
+      "Claude Sonnet 4": "claude-sonnet-4-20250514",
+      "Claude Opus 4.1": "claude-opus-4-1-20250805",
+      "claude-sonnet-4": "claude-sonnet-4-20250514",
+      "claude-opus-4-1": "claude-opus-4-1-20250805"
+    }
+    
+    // Get the actual model ID from the mapping
+    const actualModel = modelMapping[model] || model
+    console.log("[Chat API DEBUG] Model requested:", model, "-> Mapped to:", actualModel)
+    const isClaudeModel = actualModel.includes('claude')
+    
+    // Validate API keys
+    if (isClaudeModel) {
+      if (!settings.claude?.apiKey) {
+        return NextResponse.json(
+          { error: "Claude API key not configured. Please add it in Settings." },
+          { status: 400 }
+        )
+      }
+    } else {
+      if (!settings.openai?.apiKey) {
+        return NextResponse.json(
+          { error: "OpenAI API key not configured. Please add it in Settings." },
+          { status: 400 }
+        )
+      }
+    }
+    
+    // Create or get chat
+    let currentChatId = chatId
+    if (!currentChatId) {
+      const chat = db.createChat(message.slice(0, 50) + "...", model)
+      currentChatId = chat.id
+    }
+    
+    // Save user message
+    db.addMessage(currentChatId, "user", message, 0)
+    
+    // Get chat history
+    const messages = db.getChatMessages(currentChatId).map(msg => ({
+      role: msg.role as "user" | "assistant" | "system",
+      content: msg.content
+    }))
+    
+    let response;
+    let aiResponse;
+    let tokens = 0;
+    
+    if (isClaudeModel) {
+      console.log("[Chat API] Using Claude model:", actualModel)
+      console.log("[Chat API] Sending to Anthropic API with model:", actualModel)
+      
+      // Call Anthropic API
+      response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": settings.claude.apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model: actualModel,
+          messages: messages,
+          max_tokens: 2000,
+          temperature: 0.7
+        })
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error("Claude API error:", errorData)
+        return NextResponse.json(
+          { error: errorData.error?.message || "Claude API error" },
+          { status: response.status }
+        )
+      }
+      
+      const data = await response.json()
+      aiResponse = data.content[0].text
+      tokens = data.usage?.input_tokens + data.usage?.output_tokens || 0
+      
+    } else {
+      console.log("[Chat API] Using OpenAI model:", actualModel)
+      
+      // Call OpenAI API
+      response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${settings.openai.apiKey}`
+        },
+        body: JSON.stringify({
+          model: actualModel,
+          messages: messages,
+          max_tokens: 2000,
+          temperature: 0.7
+        })
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error("OpenAI API error:", errorData)
+        return NextResponse.json(
+          { error: errorData.error?.message || "OpenAI API error" },
+          { status: response.status }
+        )
+      }
+      
+      const data = await response.json()
+      aiResponse = data.choices[0].message.content
+      tokens = data.usage?.total_tokens || 0
+    }
+    
+    // Save assistant response with token count
+    db.addMessage(currentChatId, "assistant", aiResponse, tokens)
+    
+    return NextResponse.json({
+      response: aiResponse,
+      chatId: currentChatId,
+      tokens: { total: tokens },
+      model: model
+    })
+    
+  } catch (error) {
+    console.error("[Chat API] Failed:", error)
+    return NextResponse.json(
+      { 
+        error: "Failed to process chat request",
+        details: error instanceof Error ? error.message : "Unknown error"
+      },
+      { status: 500 }
+    )
+  }
+}

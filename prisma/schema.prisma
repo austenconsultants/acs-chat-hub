@@ -1,0 +1,187 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model api_keys {
+  id                  Int       @id @default(autoincrement())
+  user_id             String    @db.Uuid
+  provider            String    @db.VarChar(50)
+  api_key_encrypted   String
+  key_hash            String    @unique @db.VarChar(255)
+  enabled             Boolean?  @default(true)
+  base_url            String?
+  model               String?   @db.VarChar(100)
+  last_used_at        DateTime? @db.Timestamp(6)
+  usage_count         Int?      @default(0)
+  total_tokens        BigInt?   @default(0)
+  total_cost          Decimal?  @default(0) @db.Decimal(10, 4)
+  rate_limit_requests Int?
+  rate_limit_tokens   Int?
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+  users               users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, provider])
+  @@index([key_hash], map: "idx_api_keys_hash")
+  @@index([provider, enabled], map: "idx_api_keys_provider_enabled")
+  @@index([user_id, enabled], map: "idx_api_keys_user_enabled")
+}
+
+model audit_logs {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id     String?   @db.Uuid
+  action      String    @db.VarChar(50)
+  entity_type String    @db.VarChar(50)
+  entity_id   String?   @db.VarChar(255)
+  old_values  Json?
+  new_values  Json?
+  ip_address  String?   @db.VarChar(45)
+  user_agent  String?
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  users       users?    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([action, created_at], map: "idx_audit_logs_action")
+  @@index([entity_type, entity_id], map: "idx_audit_logs_entity")
+  @@index([user_id, created_at], map: "idx_audit_logs_user")
+}
+
+model cache_entries {
+  id               String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  key              String    @unique @db.VarChar(255)
+  value            Json
+  expires_at       DateTime  @db.Timestamp(6)
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  access_count     Int?      @default(0)
+  last_accessed_at DateTime? @db.Timestamp(6)
+
+  @@index([expires_at], map: "idx_cache_expires")
+  @@index([key, expires_at], map: "idx_cache_key_expires")
+}
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model chat_settings {
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model chats {
+// }
+
+model error_logs {
+  id                String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  level             String    @db.VarChar(20)
+  message           String
+  stack             String?
+  context           Json?
+  user_id           String?   @db.VarChar(255)
+  url               String?
+  user_agent        String?
+  resolved          Boolean?  @default(false)
+  resolved_at       DateTime? @db.Timestamp(6)
+  notes             String?
+  occurrence_count  Int?      @default(1)
+  first_occurred_at DateTime? @default(now()) @db.Timestamp(6)
+  last_occurred_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  @@index([last_occurred_at], map: "idx_error_logs_last")
+  @@index([level, resolved], map: "idx_error_logs_level")
+  @@index([user_id], map: "idx_error_logs_user")
+}
+
+model feature_flags {
+  id                 Int       @id @default(autoincrement())
+  name               String    @unique @db.VarChar(255)
+  description        String?
+  enabled            Boolean?  @default(false)
+  rollout_percentage Int?      @default(0)
+  enabled_for_users  String[]  @default([])
+  disabled_for_users String[]  @default([])
+  metadata           Json?
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
+  updated_at         DateTime? @default(now()) @db.Timestamp(6)
+
+  @@index([name, enabled], map: "idx_feature_flags_name")
+}
+
+model mcp_settings {
+  id             Int       @id @default(autoincrement())
+  user_id        String    @unique @db.Uuid
+  enabled        Boolean?  @default(true)
+  server_url     String?   @default("http://10.152.0.70:8083") @db.VarChar(500)
+  timeout        Int?      @default(30000)
+  max_retries    Int?      @default(3)
+  custom_headers Json?
+  created_at     DateTime? @default(now()) @db.Timestamp(6)
+  updated_at     DateTime? @default(now()) @db.Timestamp(6)
+  users          users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([enabled], map: "idx_mcp_settings_enabled")
+  @@index([user_id, enabled], map: "idx_mcp_settings_user_enabled")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model messages {
+// }
+
+model system_config {
+  id          Int       @id @default(autoincrement())
+  key         String    @unique @db.VarChar(255)
+  value       Json
+  description String?
+  is_public   Boolean?  @default(false)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  @@index([key, is_public], map: "idx_system_config_key")
+}
+
+model ui_preferences {
+  id                Int       @id @default(autoincrement())
+  user_id           String    @unique @db.Uuid
+  theme             String?   @default("dark") @db.VarChar(20)
+  primary_color     String?   @default("#E53E3E") @db.VarChar(20)
+  font_size         String?   @default("medium") @db.VarChar(20)
+  font_family       String?   @default("Inter") @db.VarChar(50)
+  avatar_url        String?
+  display_name      String?   @default("User") @db.VarChar(255)
+  language          String?   @default("en") @db.VarChar(10)
+  timezone          String?   @default("UTC") @db.VarChar(50)
+  emoji_enabled     Boolean?  @default(true)
+  emoji_style       String?   @default("native") @db.VarChar(20)
+  sidebar_collapsed Boolean?  @default(false)
+  compact_mode      Boolean?  @default(false)
+  show_timestamps   Boolean?  @default(true)
+  sound_enabled     Boolean?  @default(true)
+  code_theme        String?   @default("github-dark") @db.VarChar(50)
+  line_numbers      Boolean?  @default(true)
+  word_wrap         Boolean?  @default(true)
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+  updated_at        DateTime? @default(now()) @db.Timestamp(6)
+  users             users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_ui_preferences_user")
+}
+
+model users {
+  id             String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  username       String          @unique @db.VarChar(255)
+  email          String?         @unique @db.VarChar(255)
+  password_hash  String?
+  is_active      Boolean?        @default(true)
+  last_login_at  DateTime?       @db.Timestamp(6)
+  created_at     DateTime?       @default(now()) @db.Timestamp(6)
+  updated_at     DateTime?       @default(now()) @db.Timestamp(6)
+  api_keys       api_keys[]
+  audit_logs     audit_logs[]
+  mcp_settings   mcp_settings?
+  ui_preferences ui_preferences?
+
+  @@index([is_active, last_login_at], map: "idx_users_active_login")
+  @@index([email], map: "idx_users_email")
+  @@index([username], map: "idx_users_username")
+}
