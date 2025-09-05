@@ -10,7 +10,7 @@ import {
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
-import { ChevronDown, Bot, Zap, Brain, Sparkles, Clock, DollarSign } from "lucide-react"
+import { ChevronDown, Bot, Zap, Brain, Sparkles, Clock, DollarSign, Crown } from "lucide-react"
 
 type ModelId =
   | "gpt-4o"
@@ -18,12 +18,14 @@ type ModelId =
   | "gpt-4-turbo"
   | "gpt-4"
   | "gpt-3.5-turbo"
+  | "claude-opus-4.1"
+  | "claude-opus-4"
+  | "claude-sonnet-4"
+  | "claude-3.7-sonnet"
   | "claude-3-5-sonnet"
   | "claude-3-opus"
   | "claude-3-sonnet"
   | "claude-3-haiku"
-  | "claude-opus-4-1"
-  | "claude-sonnet-4"
 
 interface ModelSelectorProps {
   selectedModel: ModelId
@@ -81,29 +83,47 @@ export function ModelSelector({ selectedModel, onModelChange }: ModelSelectorPro
 
   const claudeModels = [
     {
-      id: "claude-opus-4-1" as const,
+      id: "claude-opus-4.1" as const,
       name: "Claude Opus 4.1",
-      description: "Newest & most powerful Claude model",
-      icon: Sparkles,
-      badge: "Latest",
-      cost: "Check pricing",
+      description: "Latest flagship model with enhanced capabilities",
+      icon: Crown,
+      badge: "Newest",
+      cost: "$20/$80 per 1M tokens",
+      contextWindow: "200K",
+    },
+    {
+      id: "claude-opus-4" as const,
+      name: "Claude Opus 4",
+      description: "Most powerful Claude 4 model for complex reasoning",
+      icon: Crown,
+      badge: "Premium",
+      cost: "$18/$75 per 1M tokens",
       contextWindow: "200K",
     },
     {
       id: "claude-sonnet-4" as const,
       name: "Claude Sonnet 4",
-      description: "Advanced Claude 4 model",
+      description: "State-of-the-art coding and reasoning (72.7% SWE-bench)",
+      icon: Sparkles,
+      badge: "Latest",
+      cost: "$8/$25 per 1M tokens",
+      contextWindow: "200K",
+    },
+    {
+      id: "claude-3.7-sonnet" as const,
+      name: "Claude 3.7 Sonnet",
+      description: "Enhanced Sonnet with improved performance",
       icon: Brain,
-      badge: "New",
-      cost: "Check pricing",
+      badge: "Enhanced",
+      cost: "$5/$20 per 1M tokens",
       contextWindow: "200K",
     },
     {
       id: "claude-3-5-sonnet" as const,
       name: "Claude 3.5 Sonnet",
-      description: "Most intelligent Claude model",
+      description: "Most intelligent Claude 3 model",
       icon: Sparkles,
-      badge: "Best",
+      badge: "Popular",
       cost: "$3/$15 per 1M tokens",
       contextWindow: "200K",
     },
